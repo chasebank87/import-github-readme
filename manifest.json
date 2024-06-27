@@ -1,0 +1,11 @@
+{
+	"id": "import-github-readme",
+	"name": "Import GitHub ",
+	"version": "1.0.0",
+	"minAppVersion": "0.15.0",
+	"description": "Allows you to import a GitHub README file into your vault.",
+	"author": "Chasebank87",
+	"authorUrl": "https://obsidian.md",
+	"fundingUrl": "https://obsidian.md/pricing",
+	"isDesktopOnly": false
+}
