@@ -1,6 +1,6 @@
 {
 	"id": "import-github-readme",
-	"name": "Import GitHub ",
+	"name": "Import GitHub Readme",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
 	"description": "Allows you to import a GitHub README file into your vault.",

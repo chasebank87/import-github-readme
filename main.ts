@@ -1,5 +1,6 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
-import axios from 'axios';
+import { App, Editor, MarkdownView, Modal, Notice, Plugin, Setting } from 'obsidian';
+import TurndownService from 'turndown';
+import { marked } from 'marked';
 
 export default class GitHubReadmeImporter extends Plugin {
   async onload() {
@@ -16,9 +17,12 @@ export default class GitHubReadmeImporter extends Plugin {
 
   async importReadme(repoUrl: string, editor: Editor) {
     try {
-      const readmeContent = await this.fetchReadme(repoUrl);
-      const updatedContent = await this.handleEmbeddedAssets(readmeContent, repoUrl);
-      editor.replaceSelection(updatedContent);
+      let readmeContent = await this.fetchReadme(repoUrl);
+      readmeContent = this.convertHtmlToMarkdown(readmeContent);
+      readmeContent = this.removeEmptyLinesInsideHtmlTags(readmeContent);
+      readmeContent = this.removeBrAndDivTags(readmeContent);
+      readmeContent = this.convertRelativeImageUrls(readmeContent, repoUrl);
+      editor.replaceSelection(readmeContent);
       new Notice('README imported successfully!');
     } catch (error) {
       new Notice('Failed to import README. Please check the repository URL.');
@@ -30,11 +34,15 @@ export default class GitHubReadmeImporter extends Plugin {
     const [owner, repo] = this.parseRepoUrl(repoUrl);
     const apiUrl = `https://api.github.com/repos/${owner}/${repo}/readme`;
     
-    const response = await axios.get(apiUrl, {
+    const response = await fetch(apiUrl, {
       headers: { 'Accept': 'application/vnd.github.v3.raw' }
     });
 
-    return response.data;
+    if (!response.ok) {
+      throw new Error(`Failed to fetch README: ${response.statusText}`);
+    }
+
+    return await response.text();
   }
 
   parseRepoUrl(url: string): [string, string] {
@@ -42,45 +50,64 @@ export default class GitHubReadmeImporter extends Plugin {
     return [parts[parts.length - 2], parts[parts.length - 1]];
   }
 
-  async handleEmbeddedAssets(content: string, repoUrl: string): Promise<string> {
-    const assetUrls = this.extractAssetUrls(content, repoUrl);
-    for (const assetUrl of assetUrls) {
-      const localPath = await this.downloadAsset(assetUrl);
-      content = content.replace(assetUrl, localPath);
-    }
+  convertHtmlToMarkdown(content: string): string {
+    const regex = /<(\w+)(?:[^>]+)?>([\s\S]*?)<\/\1>/g;
+  
+    return content.replace(regex, (match, tag, text) => {
+      // Check if the content inside the tag contains Markdown
+      if (/<[^>]+>/.test(text)) {
+        // Convert the Markdown content to HTML using marked.js
+        const html = marked(text);
+        // Return the HTML tag with the converted content
+        return `<${tag}>${html}</${tag}>`;
+      } else {
+        // Return the original HTML tag
+        return match;
+      }
+    });
+  }
+
+  removeEmptyLinesInsideHtmlTags(content: string): string {
+    const regex = /<(\w+)[^>]*>([\s\S]*?)<\/\1>/g;
+
+    return content.replace(regex, (match) => {
+      return match.replace(/\n\s*/g, '');
+    });
+  }
+
+  removeBrAndDivTags(content: string): string {
+    return content.replace(/<br\s*\/?>/g, '').replace(/<\/?\s*div[^>]*>/g, '');
+  }
+
+  convertRelativeImageUrls(content: string, repoUrl: string): string {
+    const [owner, repo] = this.parseRepoUrl(repoUrl);
+    const baseUrl = `https://github.com/${owner}/${repo}/blob/main/`;
+    
+    // Convert Markdown image URLs
+    content = content.replace(/!\[([^\]]*)\]\((?!http)([^)]+)\)/g, (match, alt, url) => {
+      return `![${alt}](${this.resolveUrl(url, baseUrl)}?raw=true)`;
+    });
+
+    // Convert HTML image URLs
+    content = content.replace(/<img.*?src=["'](?!http)([^"']+)["'].*?>/g, (match, url) => {
+      return match.replace(url, this.resolveUrl(url, baseUrl) + '?raw=true');
+    });
+
     return content;
   }
 
-  extractAssetUrls(content: string, repoUrl: string): string[] {
-    const assetUrls: string[] = [];
-    const regex = /!\[.*?\]\((.*?)\)/g;
-    let match;
-    while ((match = regex.exec(content)) !== null) {
-      try {
-        const assetUrl = new URL(match[1], repoUrl).href;
-        assetUrls.push(assetUrl);
-      } catch (error) {
-        console.error(`Failed to construct URL for ${match[1]}:`, error);
+  resolveUrl(url: string, base: string): string {
+    try {
+      // Check if the URL is already absolute
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        return url;
       }
+      // If it's not absolute, resolve it against the base URL
+      return new URL(url, base).href;
+    } catch (error) {
+      console.warn(`Failed to resolve URL: ${url}`, error);
+      return url; // Return the original URL if resolution fails
     }
-    return assetUrls;
-  }
-
-  async downloadAsset(url: string): Promise<string> {
-    const response = await axios.get(url, { responseType: 'arraybuffer' });
-    const assetName = url.split('/').pop();
-    const assetFolderPath = 'assets';
-    const assetFilePath = `${assetFolderPath}/${assetName}`;
-
-    // Ensure the assets folder exists
-    const folderExists = await this.app.vault.adapter.exists(assetFolderPath);
-    if (!folderExists) {
-      await this.app.vault.createFolder(assetFolderPath);
-    }
-
-    // Save the asset to the vault
-    await this.app.vault.createBinary(assetFilePath, response.data);
-    return assetFilePath;
   }
 }
 
