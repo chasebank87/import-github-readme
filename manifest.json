@@ -3,9 +3,8 @@
 	"name": "Import GitHub Readme",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
-	"description": "Allows you to import a GitHub README file into your vault.",
+	"description": "Fetches and integrates GitHub README files into personal notesmai",
 	"author": "Chasebank87",
 	"authorUrl": "https://chaseelder.com",
-	"fundingUrl": "https://github.com/chasebank87/import-github-readme.git",
 	"isDesktopOnly": false
 }

@@ -2313,7 +2313,7 @@ var GitHubReadmeImporter = class extends import_obsidian.Plugin {
   async importReadme(repoUrl, editor) {
     try {
       let readmeContent = await this.fetchReadme(repoUrl);
-      readmeContent = this.convertHtmlToMarkdown(readmeContent);
+      readmeContent = this.convertMarkdownToHTML(readmeContent);
       readmeContent = this.removeEmptyLinesInsideHtmlTags(readmeContent);
       readmeContent = this.removeBrAndDivTags(readmeContent);
       readmeContent = this.convertRelativeImageUrls(readmeContent, repoUrl);
@@ -2327,19 +2327,20 @@ var GitHubReadmeImporter = class extends import_obsidian.Plugin {
   async fetchReadme(repoUrl) {
     const [owner, repo] = this.parseRepoUrl(repoUrl);
     const apiUrl = `https://api.github.com/repos/${owner}/${repo}/readme`;
-    const response = await fetch(apiUrl, {
+    const response = await (0, import_obsidian.requestUrl)({
+      url: apiUrl,
       headers: { "Accept": "application/vnd.github.v3.raw" }
     });
-    if (!response.ok) {
-      throw new Error(`Failed to fetch README: ${response.statusText}`);
+    if (!response.status) {
+      throw new Error(`Failed to fetch README: ${response.status}`);
     }
-    return await response.text();
+    return response.text;
   }
   parseRepoUrl(url) {
     const parts = url.split("/");
     return [parts[parts.length - 2], parts[parts.length - 1]];
   }
-  convertHtmlToMarkdown(content) {
+  convertMarkdownToHTML(content) {
     const regex = /<(\w+)(?:[^>]+)?>([\s\S]*?)<\/\1>/g;
     return content.replace(regex, (match, tag2, text) => {
       if (/<[^>]+>/.test(text)) {

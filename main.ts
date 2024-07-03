@@ -1,4 +1,4 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, Setting } from 'obsidian';
+import { App, Editor, MarkdownView, Modal, Notice, Plugin, Setting, requestUrl, htmlToMarkdown } from 'obsidian';
 import TurndownService from 'turndown';
 import { marked } from 'marked';
 
@@ -18,7 +18,7 @@ export default class GitHubReadmeImporter extends Plugin {
   async importReadme(repoUrl: string, editor: Editor) {
     try {
       let readmeContent = await this.fetchReadme(repoUrl);
-      readmeContent = this.convertHtmlToMarkdown(readmeContent);
+      readmeContent = this.convertMarkdownToHTML(readmeContent);
       readmeContent = this.removeEmptyLinesInsideHtmlTags(readmeContent);
       readmeContent = this.removeBrAndDivTags(readmeContent);
       readmeContent = this.convertRelativeImageUrls(readmeContent, repoUrl);
@@ -34,15 +34,16 @@ export default class GitHubReadmeImporter extends Plugin {
     const [owner, repo] = this.parseRepoUrl(repoUrl);
     const apiUrl = `https://api.github.com/repos/${owner}/${repo}/readme`;
     
-    const response = await fetch(apiUrl, {
+    const response = await requestUrl({
+      url: apiUrl,
       headers: { 'Accept': 'application/vnd.github.v3.raw' }
     });
 
-    if (!response.ok) {
-      throw new Error(`Failed to fetch README: ${response.statusText}`);
+    if (!response.status) {
+      throw new Error(`Failed to fetch README: ${response.status}`);
     }
 
-    return await response.text();
+    return response.text;
   }
 
   parseRepoUrl(url: string): [string, string] {
@@ -50,7 +51,7 @@ export default class GitHubReadmeImporter extends Plugin {
     return [parts[parts.length - 2], parts[parts.length - 1]];
   }
 
-  convertHtmlToMarkdown(content: string): string {
+  convertMarkdownToHTML(content: string): string {
     const regex = /<(\w+)(?:[^>]+)?>([\s\S]*?)<\/\1>/g;
   
     return content.replace(regex, (match, tag, text) => {
@@ -90,7 +91,7 @@ export default class GitHubReadmeImporter extends Plugin {
 
     // Convert HTML image URLs
     content = content.replace(/<img.*?src=["'](?!http)([^"']+)["'].*?>/g, (match, url) => {
-      return match.replace(url, this.resolveUrl(url, baseUrl) + '?raw=true');
+    return match.replace(url, this.resolveUrl(url, baseUrl) + '?raw=true');
     });
 
     return content;
