@@ -1,6 +1,7 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, Setting, requestUrl, htmlToMarkdown } from 'obsidian';
+import { App, Editor, MarkdownView, Modal, Notice, Plugin, Setting, requestUrl, htmlToMarkdown, sanitizeHTMLToDom } from 'obsidian';
 import TurndownService from 'turndown';
 import { marked } from 'marked';
+import { read } from 'fs';
 
 export default class GitHubReadmeImporter extends Plugin {
   async onload() {
@@ -19,9 +20,9 @@ export default class GitHubReadmeImporter extends Plugin {
     try {
       let readmeContent = await this.fetchReadme(repoUrl);
       readmeContent = this.convertMarkdownToHTML(readmeContent);
-      readmeContent = this.removeEmptyLinesInsideHtmlTags(readmeContent);
-      readmeContent = this.removeBrAndDivTags(readmeContent);
       readmeContent = this.convertRelativeImageUrls(readmeContent, repoUrl);
+      readmeContent = this.convertBr(readmeContent)
+      readmeContent = this.removeEmptyHtmlTags(readmeContent)
       editor.replaceSelection(readmeContent);
       new Notice('README imported successfully!');
     } catch (error) {
@@ -50,34 +51,83 @@ export default class GitHubReadmeImporter extends Plugin {
     const parts = url.split('/');
     return [parts[parts.length - 2], parts[parts.length - 1]];
   }
-
-  convertMarkdownToHTML(content: string): string {
-    const regex = /<(\w+)(?:[^>]+)?>([\s\S]*?)<\/\1>/g;
   
-    return content.replace(regex, (match, tag, text) => {
-      // Check if the content inside the tag contains Markdown
-      if (/<[^>]+>/.test(text)) {
-        // Convert the Markdown content to HTML using marked.js
-        const html = marked(text);
-        // Return the HTML tag with the converted content
-        return `<${tag}>${html}</${tag}>`;
-      } else {
-        // Return the original HTML tag
-        return match;
-      }
-    });
-  }
+ convertMarkdownToHTML(content: string): string {
+    const lines = content.split('\n');
+    const result: string[] = [];
+    let currentHtmlTag: string | null = null;
+    let isInMarkdown = false;
 
-  removeEmptyLinesInsideHtmlTags(content: string): string {
-    const regex = /<(\w+)[^>]*>([\s\S]*?)<\/\1>/g;
+    const htmlOpenRegex = /^<(\w+)(?:\s+[^>]*)?>/;
+    const htmlCloseRegex = /^<\/(\w+)>/;
+    const markdownChars = new Set(['#', '-', '*', '>', '[', '!', '`', '|', '1', '2', '3', '4', '5', '6', '7', '8', '9']);
 
-    return content.replace(regex, (match) => {
-      return match.replace(/\n\s*/g, '');
-    });
-  }
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trimStart();
+        const firstChar = line[0];
+        const openMatch = line.match(htmlOpenRegex);
+        const closeMatch = line.match(htmlCloseRegex);
 
-  removeBrAndDivTags(content: string): string {
-    return content.replace(/<br\s*\/?>/g, '').replace(/<\/?\s*div[^>]*>/g, '');
+        if (openMatch && !currentHtmlTag) {
+            // Start of a new HTML tag
+            currentHtmlTag = openMatch[1];
+            result.push(lines[i]);
+            isInMarkdown = false;
+        } else if (closeMatch && currentHtmlTag === closeMatch[1]) {
+            // End of current HTML tag
+            currentHtmlTag = null;
+            result.push(lines[i]);
+            isInMarkdown = false;
+        } else if (currentHtmlTag) {
+            // Inside an HTML tag
+            if (markdownChars.has(firstChar)) {
+                // Markdown content inside HTML
+                if (!isInMarkdown) {
+                    result.push(`</${currentHtmlTag}>`);
+                    isInMarkdown = true;
+                }
+                result.push(lines[i]);
+            } else {
+                // Regular HTML content
+                if (isInMarkdown) {
+                    result.push(`<${currentHtmlTag}>`);
+                    isInMarkdown = false;
+                }
+                result.push(this.sanitizeLine(lines[i]));
+            }
+        } else {
+            // Outside any HTML tag
+            result.push(lines[i]);
+        }
+    }
+
+    return result.join('\n');
+}
+
+ sanitizeLine(line: string): string {
+    const tempDiv = document.createElement('div');
+    tempDiv.appendChild(sanitizeHTMLToDom(line));
+    return tempDiv.innerHTML;
+}
+
+removeEmptyHtmlTags(content: string): string {
+  // Regular expression to match empty HTML tags
+  const emptyTagRegex = /<([a-z]+)(?:\s+[^>]*)?>\s*<\/\1>/gi;
+  
+  // Replace empty tags with an empty string
+  let result = content;
+  let previousResult;
+  
+  do {
+      previousResult = result;
+      result = result.replace(emptyTagRegex, '');
+  } while (result !== previousResult);
+  
+  return result;
+}
+
+  convertBr(content: string): string {
+    return content.replace(/<\/?br\s*\/?>\s*/gi, htmlToMarkdown('</br>'));
   }
 
   convertRelativeImageUrls(content: string, repoUrl: string): string {
